@@ -20,11 +20,20 @@
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
 
-#define LED_COUNT 1
-#define LED_STRIP_HEADER_SIZE 4
-#define LED_STRIP_TRAILER_SIZE 4
-#define LED_STRIP_BUFFER_SIZE (LED_COUNT * 4 + LED_STRIP_HEADER_SIZE + LED_STRIP_TRAILER_SIZE)
-DRAM_ATTR char led_strip_data[LED_STRIP_BUFFER_SIZE];
+#define LED_COUNT 3
+#define LED_STRIP_HEADER_SIZE_BYTES 4
+// The data sheet says the end sequence is 4 bytes, but reports say
+// it's depending on the number of chained LEDs so this needs
+// to be adjusted for longer strips
+#define LED_STRIP_TRAILER_SIZE_BYTES 4
+#define LED_STRIP_BUFFER_SIZE_BYTES (LED_COUNT * 4 + LED_STRIP_HEADER_SIZE_BYTES + LED_STRIP_TRAILER_SIZE_BYTES)
+#define LED_STRIP_BUFFER_SIZE_BITS (LED_STRIP_BUFFER_SIZE_BYTES * 8)
+DRAM_ATTR char led_strip_data[LED_STRIP_BUFFER_SIZE_BYTES];
+
+#define LED_PREAMBLE_START 0xe0
+// Range 0 - 31
+#define LED_BRIGHTNESS 20
+#define LED_PREAMBLE (LED_PREAMBLE_START | LED_BRIGHTNESS)
 
 /* app state machine */
 typedef enum application_state {
@@ -88,7 +97,7 @@ static void start_timer(application_data_t *app_data);
 static void stop_timer(application_data_t *app_data);
 esp_err_t _http_event_handle(esp_http_client_event_t *evt);
 void update_led_strip(double value, spi_device_handle_t spi);
-static void update_value(application_data_t *app_data);
+static void query_stock_data_and_update_led_strip(application_data_t *app_data);
 
 
 esp_err_t event_handler(void *ctx, system_event_t *event) {
@@ -107,7 +116,7 @@ esp_err_t event_handler(void *ctx, system_event_t *event) {
 
             application_transition_to_state(&app_data->state, application_state_online);
             // force an initial update
-            update_value(app_data);
+            query_stock_data_and_update_led_strip(app_data);
             start_timer(app_data);
             break;
 
@@ -234,7 +243,6 @@ void initialize_spi(application_data_t *app_data) {
         .sclk_io_num = PIN_NUM_CLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = SPI_MAX_DMA_LEN
     };
 
     spi_device_interface_config_t devcfg = {
@@ -279,11 +287,11 @@ static void periodic_timer_callback(void* arg)
     int64_t time_since_boot = esp_timer_get_time();
     printf("Periodic timer called, time since boot: %lld us\n", time_since_boot);
     application_data_t *app_data = arg;
-    update_value(app_data);
+    query_stock_data_and_update_led_strip(app_data);
 }
 
-static void update_value(application_data_t *app_data) {
-    printf("Updating value\n");
+static void query_stock_data_and_update_led_strip(application_data_t *app_data) {
+    printf("Querying stock data\n");
 
     http_request_data_t data;
     bzero(&data, sizeof(data));
@@ -307,7 +315,7 @@ static void update_value(application_data_t *app_data) {
         update_led_strip(data.value, app_data->spi_device_handle);
     } else {
         printf("Unable to get valid value\n");
-        update_led_strip(0.0, app_data->spi_device_handle);
+        // update_led_strip(0.0, app_data->spi_device_handle);
     }
     
     // debug
@@ -319,12 +327,12 @@ void update_led_strip(double value, spi_device_handle_t spi) {
 
     char *p = led_strip_data;
 
-    memset(p, 0, LED_STRIP_HEADER_SIZE);
-    p += LED_STRIP_HEADER_SIZE;
+    memset(p, 0, LED_STRIP_HEADER_SIZE_BYTES);
+    p += LED_STRIP_HEADER_SIZE_BYTES;
     for (int i = 0; i < LED_COUNT; i++)
     {
-        *p++ = 0xff;
-        if (value > 0) {
+        *p++ = LED_PREAMBLE;
+        if (value > 0.0) {
             *p++ = 0x00;
             *p++ = 0xff;
             *p++ = 0x00;
@@ -339,18 +347,22 @@ void update_led_strip(double value, spi_device_handle_t spi) {
         }
     }
     
-    memset(p, 0xff, LED_STRIP_TRAILER_SIZE);
+    // Set trailing bytes to 0 instead of 1 as the datasheet
+    // specifies because it doesn't seem to matter (it's only needed for extra clock pulses)
+    // and setting to 0 will not light up an extra LED at the end
+    // if there is one.
+    memset(p, 0x00, LED_STRIP_TRAILER_SIZE_BYTES);
 
-    // int i = 0;
-    // for (char *q = led_strip_data; q < led_strip_data + LED_STRIP_BUFFER_SIZE; q++) {
-    //     printf("LED %02d %p %x\n", i++, q, *q);
-    // }
+    int i = 0;
+    for (char *q = led_strip_data; q < led_strip_data + LED_STRIP_BUFFER_SIZE_BYTES; q++) {
+        printf("LED %02d %p %x\n", i++, q, *q);
+    }
     
     esp_err_t ret;
 
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
-    t.length = LED_STRIP_BUFFER_SIZE * 8;
+    t.length = LED_STRIP_BUFFER_SIZE_BITS;
     t.user = (void *)0;
     t.tx_buffer = led_strip_data;
 
