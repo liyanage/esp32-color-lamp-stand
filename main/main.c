@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
@@ -13,18 +14,22 @@
 #include "esp_timer.h"
 #include "esp_http_client.h"
 #include "alphavantage_api_key.h"
+#include "pixel.h"
 
-// console support (config menu)
+// Serial console boot-time config menu support
 #include "configuration_menu.h"
+
+// Test mode uses a random number instead of performing an HTTP request
+#define LED_TEST_MODE 0
 
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
 
-#define LED_COUNT 3
+#define LED_COUNT 10
 #define LED_STRIP_HEADER_SIZE_BYTES 4
 // The data sheet says the end sequence is 4 bytes, but reports say
 // it's depending on the number of chained LEDs so this needs
-// to be adjusted for longer strips
+// to be adjusted for longer strips. It needs to be at least LED_COUNT / 2 bits.
 #define LED_STRIP_TRAILER_SIZE_BYTES 4
 #define LED_STRIP_BUFFER_SIZE_BYTES (LED_COUNT * 4 + LED_STRIP_HEADER_SIZE_BYTES + LED_STRIP_TRAILER_SIZE_BYTES)
 #define LED_STRIP_BUFFER_SIZE_BITS (LED_STRIP_BUFFER_SIZE_BYTES * 8)
@@ -32,8 +37,10 @@ DRAM_ATTR char led_strip_data[LED_STRIP_BUFFER_SIZE_BYTES];
 
 #define LED_PREAMBLE_START 0xe0
 // Range 0 - 31
-#define LED_BRIGHTNESS 20
+#define LED_BRIGHTNESS 10
 #define LED_PREAMBLE (LED_PREAMBLE_START | LED_BRIGHTNESS)
+#define ANIMATION_UPDATE_RATE_HZ 60
+#define ANIMATION_DURATION_SECONDS 3.0
 
 /* app state machine */
 typedef enum application_state {
@@ -53,42 +60,16 @@ char *application_state_label_for_value(application_state state) {
     return NULL;
 }
 
-void application_transition_to_state(application_state *current_state, application_state new_state);
-void application_transition_to_state(application_state *current_state, application_state new_state) {
-    printf("*** Application state transition from %s to %s\n", application_state_label_for_value(*current_state), application_state_label_for_value(new_state));
-    *current_state = new_state;
-}
-
 /* app state data */
 typedef struct application_data {
     application_state state;
     esp_timer_handle_t periodic_timer;
     spi_device_handle_t spi_device_handle;
-    int timer_is_armed;
-    int have_valid_value;
+    bool timer_is_armed;
+    bool have_valid_value;
     double value;
+    pixel_color_t current_pixel_color;
 } application_data_t;
-
-
-typedef struct http_request_data {
-    int have_valid_value;
-    double value;
-} http_request_data_t;
-
-/*
-DRAM_ATTR char data1[] = {
-    0, 0, 0, 0,
-    0xff, 0x00, 0x00, 0xff,
-    0xff, 0xff, 0xff, 0xff
-};
-
-DRAM_ATTR char data2[] = {
-    0, 0, 0, 0,
-    0xff, 0xff, 0x00, 0x00,
-    0xff, 0xff, 0xff, 0xff
-};
-*/
-
 
 /* prototypes */
 static void periodic_timer_callback(void* arg);
@@ -96,8 +77,22 @@ void initialize_spi(application_data_t *app_data);
 static void start_timer(application_data_t *app_data);
 static void stop_timer(application_data_t *app_data);
 esp_err_t _http_event_handle(esp_http_client_event_t *evt);
-void update_led_strip(double value, spi_device_handle_t spi);
+void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi);
 static void query_stock_data_and_update_led_strip(application_data_t *app_data);
+void application_transition_to_state(application_state *current_state, application_state new_state);
+
+
+
+typedef struct http_request_data {
+    bool have_valid_value;
+    double value;
+} http_request_data_t;
+
+
+void application_transition_to_state(application_state *current_state, application_state new_state) {
+    printf("*** Application state transition from %s to %s\n", application_state_label_for_value(*current_state), application_state_label_for_value(new_state));
+    *current_state = new_state;
+}
 
 
 esp_err_t event_handler(void *ctx, system_event_t *event) {
@@ -175,64 +170,6 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &application_data.periodic_timer));
 
-
-/*
-    esp_err_t ret;
-    spi_bus_config_t buscfg = {
-        .miso_io_num = -1,
-        .mosi_io_num = PIN_NUM_MOSI,
-        .sclk_io_num = PIN_NUM_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 0
-    };
-
-    spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1*1000*1000,
-        .mode = 0,                                //SPI mode 0
-        .spics_io_num = -1,               //CS pin
-        .queue_size = 1,                          //We want to be able to queue 7 transactions at a time
-        .pre_cb = NULL,  //Specify pre-transfer callback to handle D/C line
-        .command_bits = 0,
-        .address_bits = 0
-    };
-
-    //Initialize the SPI bus
-    ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
-    ESP_ERROR_CHECK(ret);
-
-    printf("spi before %p\n", application_data.spi_device_handle);
-    ret = spi_bus_add_device(HSPI_HOST, &devcfg, &application_data.spi_device_handle);
-    printf("spi after %p\n", application_data.spi_device_handle);
-    ESP_ERROR_CHECK(ret);
-
-    ret =  spi_device_acquire_bus(application_data.spi_device_handle, portMAX_DELAY);
-    ESP_ERROR_CHECK(ret);
-
-    int flag = 0;
-    while (1) {
-        flag = !flag;
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));       //Zero out the transaction
-        t.length = 96;                     //Command is 8 bits
-        t.user = (void *)0;                //D/C needs to be set to 0
-
-        if (flag) {
-            t.tx_buffer = data1;               //The data is the cmd itself        
-        } else {
-            t.tx_buffer = data2;               //The data is the cmd itself        
-        }
-
-        ret = spi_device_polling_transmit(application_data.spi_device_handle, &t);  //Transmit!
-        assert(ret == ESP_OK);            //Should have had no issues.
-
-        vTaskDelay(2000 / portTICK_RATE_MS);
-        
-    }
-
-*/
-
-
 }
 
 void initialize_spi(application_data_t *app_data) {
@@ -247,12 +184,9 @@ void initialize_spi(application_data_t *app_data) {
 
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 1*1000*1000,
-        .mode = 0,
         .spics_io_num = -1,
         .queue_size = 1,
         .pre_cb = NULL,
-        .command_bits = 0,
-        .address_bits = 0
     };
 
     ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
@@ -268,9 +202,12 @@ void initialize_spi(application_data_t *app_data) {
 static void start_timer(application_data_t *app_data) {
     if (!app_data->timer_is_armed) {
         printf("Starting timer\n");
+#if LED_TEST_MODE
+        ESP_ERROR_CHECK(esp_timer_start_periodic(app_data->periodic_timer, 5 * 1000000));
+#else
         ESP_ERROR_CHECK(esp_timer_start_periodic(app_data->periodic_timer, 5 * 60 * 1000000));
-        // ESP_ERROR_CHECK(esp_timer_start_periodic(app_data->periodic_timer, 5 * 1000000));
-        app_data->timer_is_armed = 1;
+#endif
+        app_data->timer_is_armed = true;
     }
 }
 
@@ -278,7 +215,7 @@ static void stop_timer(application_data_t *app_data) {
     if (app_data->timer_is_armed) {
         printf("Stopping timer\n");
         ESP_ERROR_CHECK(esp_timer_stop(app_data->periodic_timer));
-        app_data->timer_is_armed = 0;
+        app_data->timer_is_armed = false;
     }
 }
 
@@ -291,75 +228,79 @@ static void periodic_timer_callback(void* arg)
 }
 
 static void query_stock_data_and_update_led_strip(application_data_t *app_data) {
-    printf("Querying stock data\n");
+    printf("Querying data\n");
 
     http_request_data_t data;
     bzero(&data, sizeof(data));
 
+#if LED_TEST_MODE
+    data.have_valid_value = true;
+    data.value = esp_random() % 2 ? -1.0 : 1.0;
+#else
     esp_http_client_config_t config = {
-        .url = "https://www.alphavantage.co/query?function=ROC&symbol=AAPL&interval=60min&time_period=10&series_type=close&apikey=" ALPHAVANTAGE_API_KEY,
+        .url = "https://www.alphavantage.co/query?function=ROC&symbol=AAPL&interval=5min&time_period=1&series_type=close&apikey=" ALPHAVANTAGE_API_KEY,
         .event_handler = _http_event_handle,
         .user_data = &data,
     };
+
     esp_http_client_handle_t client = esp_http_client_init(&config);
     esp_err_t err = esp_http_client_perform(client);
     if (err == ESP_OK) {
         printf("Status = %d, content_length = %d\n", esp_http_client_get_status_code(client), esp_http_client_get_content_length(client));
     }
     esp_http_client_cleanup(client);
-
-    // data.have_valid_value = 1;
-    // data.value = 0.5454;
+#endif
 
     if (data.have_valid_value) {
-        update_led_strip(data.value, app_data->spi_device_handle);
+        printf("New value %f\n", data.value);
+        pixel_color_t new_color = data.value < 0 ? pixel_color_red : pixel_color_green;
+        if (pixel_color_equal(app_data->current_pixel_color, new_color)) {
+            printf("No value/color change, skipping LED update\n");
+            return;
+        }
+
+        int update_steps = ANIMATION_DURATION_SECONDS * ANIMATION_UPDATE_RATE_HZ;
+        double update_increment = 1.0 / update_steps;
+        TickType_t update_step_delay_ticks = ((TickType_t)(ANIMATION_DURATION_SECONDS * 1000) / update_steps / portTICK_PERIOD_MS);
+        for (double x = 0.0; x <= 1.0; x += update_increment) {
+            // pixel_color_t step_color = interpolate_pixel_color(app_data->current_pixel_color, new_color, x);
+            pixel_color_t step_color = interpolate_pixel_color3(app_data->current_pixel_color, pixel_color_black, new_color, x);
+            update_led_strip(step_color, app_data->spi_device_handle);
+            vTaskDelay(update_step_delay_ticks);
+        }
+
+        app_data->current_pixel_color = new_color;
     } else {
         printf("Unable to get valid value\n");
-        // update_led_strip(0.0, app_data->spi_device_handle);
     }
     
-    // debug
-    // stop_timer(app_data);
 }
 
-void update_led_strip(double value, spi_device_handle_t spi) {
-    printf("Updating LEDs with value %f\n", value);
-
+void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi) {
     char *p = led_strip_data;
 
     memset(p, 0, LED_STRIP_HEADER_SIZE_BYTES);
     p += LED_STRIP_HEADER_SIZE_BYTES;
     for (int i = 0; i < LED_COUNT; i++)
     {
-        *p++ = LED_PREAMBLE;
-        if (value > 0.0) {
-            *p++ = 0x00;
-            *p++ = 0xff;
-            *p++ = 0x00;
-        } else if (value < 0) {
-            *p++ = 0x00;
-            *p++ = 0x00;
-            *p++ = 0xff;
-        } else {
-            *p++ = 0xff;
-            *p++ = 0xff;
-            *p++ = 0xff;
-        }
+        *p++ = (LED_PREAMBLE_START | pixel_color.brightness);
+        *p++ = pixel_color.b;
+        *p++ = pixel_color.g;
+        *p++ = pixel_color.r;
     }
     
     // Set trailing bytes to 0 instead of 1 as the datasheet
-    // specifies because it doesn't seem to matter (it's only needed for extra clock pulses)
-    // and setting to 0 will not light up an extra LED at the end
-    // if there is one.
+    // specifies because it doesn't seem to matter (it's only needed to
+    // drive extra clock pulses) and setting to 0 will not light up an
+    // extra LED at the end if there is one.
     memset(p, 0x00, LED_STRIP_TRAILER_SIZE_BYTES);
 
-    int i = 0;
-    for (char *q = led_strip_data; q < led_strip_data + LED_STRIP_BUFFER_SIZE_BYTES; q++) {
-        printf("LED %02d %p %x\n", i++, q, *q);
-    }
+    // int i = 0;
+    // for (char *q = led_strip_data; q < led_strip_data + LED_STRIP_BUFFER_SIZE_BYTES; q++) {
+    //     printf("LED %02d %p %x\n", i++, q, *q);
+    // }
     
     esp_err_t ret;
-
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
     t.length = LED_STRIP_BUFFER_SIZE_BITS;
@@ -400,7 +341,7 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt) {
                     double value = strtod(match + 8, &end);
                     if (end) {
                         printf("Found ROC value %f\n", value);
-                        data->have_valid_value = 1;
+                        data->have_valid_value = true;
                         data->value = value;
                     } else {
                         printf("Unable to parse value\n");
