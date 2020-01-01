@@ -25,7 +25,7 @@
 #define PIN_NUM_MOSI 13
 #define PIN_NUM_CLK  14
 
-#define LED_COUNT 10
+#define LED_COUNT 32
 #define LED_STRIP_HEADER_SIZE_BYTES 4
 // The data sheet says the end sequence is 4 bytes, but reports say
 // it's depending on the number of chained LEDs so this needs
@@ -71,22 +71,23 @@ typedef struct application_data {
     pixel_color_t current_pixel_color;
 } application_data_t;
 
+typedef struct stock_data {
+    bool have_valid_value;
+    double value;
+} stock_data_t;
+
 /* prototypes */
 static void periodic_timer_callback(void* arg);
 void initialize_spi(application_data_t *app_data);
 static void start_timer(application_data_t *app_data);
 static void stop_timer(application_data_t *app_data);
-esp_err_t _http_event_handle(esp_http_client_event_t *evt);
+esp_err_t _http_event_handle_alphavantage(esp_http_client_event_t *evt);
+esp_err_t _http_event_handle_nasdaq(esp_http_client_event_t *evt);
 void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi);
 static void query_stock_data_and_update_led_strip(application_data_t *app_data);
 void application_transition_to_state(application_state *current_state, application_state new_state);
-
-
-
-typedef struct http_request_data {
-    bool have_valid_value;
-    double value;
-} http_request_data_t;
+void get_stock_data_nasdaq(stock_data_t *stock_data);
+void get_stock_data_alphavantage(stock_data_t *stock_data);
 
 
 void application_transition_to_state(application_state *current_state, application_state new_state) {
@@ -230,50 +231,42 @@ static void periodic_timer_callback(void* arg)
 static void query_stock_data_and_update_led_strip(application_data_t *app_data) {
     printf("Querying data\n");
 
-    http_request_data_t data;
+    stock_data_t data;
     bzero(&data, sizeof(data));
 
 #if LED_TEST_MODE
     data.have_valid_value = true;
     data.value = esp_random() % 2 ? -1.0 : 1.0;
 #else
-    esp_http_client_config_t config = {
-        .url = "https://www.alphavantage.co/query?function=ROC&symbol=AAPL&interval=5min&time_period=1&series_type=close&apikey=" ALPHAVANTAGE_API_KEY,
-        .event_handler = _http_event_handle,
-        .user_data = &data,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_err_t err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        printf("Status = %d, content_length = %d\n", esp_http_client_get_status_code(client), esp_http_client_get_content_length(client));
-    }
-    esp_http_client_cleanup(client);
+    // get_stock_data_alphavantage(&data);
+    get_stock_data_nasdaq(&data);
 #endif
 
+    pixel_color_t new_color = pixel_color_white;
     if (data.have_valid_value) {
         printf("New value %f\n", data.value);
-        pixel_color_t new_color = data.value < 0 ? pixel_color_red : pixel_color_green;
-        if (pixel_color_equal(app_data->current_pixel_color, new_color)) {
-            printf("No value/color change, skipping LED update\n");
-            return;
-        }
-
-        int update_steps = ANIMATION_DURATION_SECONDS * ANIMATION_UPDATE_RATE_HZ;
-        double update_increment = 1.0 / update_steps;
-        TickType_t update_step_delay_ticks = ((TickType_t)(ANIMATION_DURATION_SECONDS * 1000) / update_steps / portTICK_PERIOD_MS);
-        for (double x = 0.0; x <= 1.0; x += update_increment) {
-            // pixel_color_t step_color = interpolate_pixel_color(app_data->current_pixel_color, new_color, x);
-            pixel_color_t step_color = interpolate_pixel_color3(app_data->current_pixel_color, pixel_color_black, new_color, x);
-            update_led_strip(step_color, app_data->spi_device_handle);
-            vTaskDelay(update_step_delay_ticks);
-        }
-
-        app_data->current_pixel_color = new_color;
+        new_color = data.value < 0 ? pixel_color_red : pixel_color_green;
     } else {
         printf("Unable to get valid value\n");
     }
-    
+
+    if (pixel_color_equal(app_data->current_pixel_color, new_color)) {
+        printf("No value/color change, skipping LED update\n");
+        return;
+    }
+
+    int update_steps = ANIMATION_DURATION_SECONDS * ANIMATION_UPDATE_RATE_HZ;
+    double update_increment = 1.0 / update_steps;
+    TickType_t update_step_delay_ticks = ((TickType_t)(ANIMATION_DURATION_SECONDS * 1000) / update_steps / portTICK_PERIOD_MS);
+    for (double x = 0.0; x <= 1.0; x += update_increment) {
+        // pixel_color_t step_color = interpolate_pixel_color(app_data->current_pixel_color, new_color, x);
+        pixel_color_t step_color = interpolate_pixel_color3(app_data->current_pixel_color, pixel_color_black, new_color, x);
+        update_led_strip(step_color, app_data->spi_device_handle);
+        vTaskDelay(update_step_delay_ticks);
+    }
+
+    app_data->current_pixel_color = new_color;
+
 }
 
 void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi) {
@@ -311,10 +304,26 @@ void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi) {
     assert(ret == ESP_OK);
 }
 
+void get_stock_data_alphavantage(stock_data_t *stock_data) {
+    esp_http_client_config_t config = {
+        .url = "https://www.alphavantage.co/query?function=ROC&symbol=AAPL&interval=5min&time_period=1&series_type=close&apikey=" ALPHAVANTAGE_API_KEY,
+        .event_handler = _http_event_handle_alphavantage,
+        .user_data = stock_data,
+    };
 
-#define VALUE_BUFFER_LEN 80
-esp_err_t _http_event_handle(esp_http_client_event_t *evt) {
-    http_request_data_t *data = evt->user_data;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) {
+        printf("Status = %d, content_length = %d\n", esp_http_client_get_status_code(client), esp_http_client_get_content_length(client));
+    } else {
+        printf("Error performing HTTP request: %d\n", err);
+    }
+    esp_http_client_cleanup(client);
+}
+
+
+esp_err_t _http_event_handle_alphavantage(esp_http_client_event_t *evt) {
+    stock_data_t *data = evt->user_data;
 
     switch(evt->event_id) {
         case HTTP_EVENT_ERROR:
@@ -334,7 +343,7 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt) {
             // printf("HTTP_EVENT_ON_DATA, len=%d chunked=%d\n", evt->data_len, esp_http_client_is_chunked_response(evt->client));
             // printf("%.*s", evt->data_len, (char*)evt->data);
             if (!(data->have_valid_value)) {
-                char *match = strstr(evt->data, "\"ROC\":");
+                char *match = memmem(evt->data, evt->data_len, "\"ROC\":", strlen("\"ROC\":"));
                 if (match) {
                     char *end = NULL;
                     // "ROC": "0.5454"
@@ -345,6 +354,79 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt) {
                         data->value = value;
                     } else {
                         printf("Unable to parse value\n");
+                    }
+                }                
+            }
+            break;
+        case HTTP_EVENT_ON_FINISH:
+            // printf("HTTP_EVENT_ON_FINISH\n");
+            break;
+        case HTTP_EVENT_DISCONNECTED:
+            // printf("HTTP_EVENT_DISCONNECTED\n");
+            break;
+    }
+    return ESP_OK;
+}
+
+void get_stock_data_nasdaq(stock_data_t *stock_data) {
+    esp_http_client_config_t config = {
+        .url = "https://api.nasdaq.com/api/quote/AAPL/quote-bar?assetclass=stocks",
+        .event_handler = _http_event_handle_nasdaq,
+        .user_data = stock_data,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_http_client_set_header(client, "Accept", "application/json, text/plain, */*");
+    esp_http_client_set_header(client, "Origin", "https://www.nasdaq.com");
+    esp_http_client_set_header(client, "Host", "api.nasdaq.com");
+    esp_http_client_set_header(client, "Referer", "https://www.nasdaq.com/market-activity/stocks/aapl/real-time");
+    esp_http_client_set_header(client, "Connection", "keep-alive");
+    esp_http_client_set_header(client, "Accept-Encoding", "gzip, deflate, br");
+    esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.2 Safari/605.1.15");
+    esp_http_client_set_header(client, "Accept-Language", "en-us");
+
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) {
+        printf("Status = %d, content_length = %d\n", esp_http_client_get_status_code(client), esp_http_client_get_content_length(client));
+    } else {
+        printf("Error performing HTTP request: %d\n", err);
+    }
+    esp_http_client_cleanup(client);
+}
+
+esp_err_t _http_event_handle_nasdaq(esp_http_client_event_t *evt) {
+    stock_data_t *data = evt->user_data;
+
+    switch(evt->event_id) {
+        case HTTP_EVENT_HEADER_SENT:
+        case HTTP_EVENT_ON_HEADER:
+            break;
+
+        case HTTP_EVENT_ERROR:
+            printf("HTTP_EVENT_ERROR\n");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            printf("HTTP_EVENT_ON_CONNECTED\n");
+            break;
+        case HTTP_EVENT_ON_DATA:
+            printf("HTTP_EVENT_ON_DATA, len=%d chunked=%d\n", evt->data_len, esp_http_client_is_chunked_response(evt->client));
+            printf("%.*s\n", evt->data_len, (char*)evt->data);
+            if (!(data->have_valid_value)) {
+                char *match = memmem(evt->data, evt->data_len, "\"deltaIndicator\":", strlen("\"deltaIndicator\":"));
+                if (match) {
+                    bool up_match = memmem(evt->data, evt->data_len, "\"deltaIndicator\":\"up\"", strlen("\"deltaIndicator\":\"up\"")) != NULL;
+                    bool down_match = memmem(evt->data, evt->data_len, "\"deltaIndicator\":\"down\"", strlen("\"deltaIndicator\":\"down\"")) != NULL;
+                    if (up_match) {
+                        printf("Found 'up' indicator\n");
+                        data->have_valid_value = true;
+                        data->value = 1.0;
+                    } else if (down_match) {
+                        printf("Found 'down' indicator\n");
+                        data->have_valid_value = true;
+                        data->value = -1.0;
+                    } else {
+                        printf("Unable to find 'up' or 'down' value:\n");
+                        printf("%.*s", evt->data_len, (char*)evt->data);
                     }
                 }                
             }

@@ -3,7 +3,10 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := esp32-stock-color-lamp-stand
+#used for memmem
+CFLAGS := -D__GNU_VISIBLE
+
+PROJECT_NAME := esp32-color-lamp-stand
 
 include $(IDF_PATH)/make/project.mk
 
