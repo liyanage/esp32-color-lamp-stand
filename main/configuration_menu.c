@@ -186,14 +186,18 @@ bool run_configuration_menu_state_machine(void) {
                 if (line) {
                     strlcpy(s_wifi_password, line, WIFI_CREDENTIAL_BUFFER_SIZE);
                     linenoiseFree(line);
-                    printf("Updating WiFi credentials in NVS\n");
-                    err = nvs_set_str(my_handle, NVS_KEY_WIFI_SSID, s_wifi_ssid);
-                    if (err == ESP_OK) {
-                        err = nvs_set_str(my_handle, NVS_KEY_WIFI_PASSWORD, s_wifi_password);
-                    }
-                    if (err == ESP_OK) {
-                        did_update_wifi_credentials = true;
-                    }
+                } else {
+                    // Assume this network does not need a password
+                    strlcpy(s_wifi_password, "", WIFI_CREDENTIAL_BUFFER_SIZE);
+                    printf("Using blank WiFi password\n");
+                }
+                printf("Updating WiFi credentials in NVS\n");
+                err = nvs_set_str(my_handle, NVS_KEY_WIFI_SSID, s_wifi_ssid);
+                if (err == ESP_OK) {
+                    err = nvs_set_str(my_handle, NVS_KEY_WIFI_PASSWORD, s_wifi_password);
+                }
+                if (err == ESP_OK) {
+                    did_update_wifi_credentials = true;
                 }
             }
             if (did_update_wifi_credentials) {
