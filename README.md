@@ -32,4 +32,4 @@ reboot to ensure the device can connect to WiFi successfully.
 
 7.) Disconnect the screen session with Ctrl-a followed by Ctrl-\ .
 
-[This screen video shows an example](docs/readme-resources/esp32-color-lamp-stand-config-menu.gif | width=742)
+![This screen video shows an example](docs/readme-resources/esp32-color-lamp-stand-config-menu.gif)
