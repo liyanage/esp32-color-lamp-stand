@@ -1,13 +1,31 @@
 
-# Stand Base Model
+# User Guide
 
-https://a360.co/36blYHf
+## Hardware Installation
 
-# Initial WiFi Configuration
+1.) You'll need a USB-C power source, either your Mac or a USB-C wall charger
+that can provide at least 1.5A. I've had good results with this one from Anker:
+https://www.amazon.com/dp/B07GWN4PGL.
+
+2.) You'll also need a USB-C cable, intially for configuration of the WiFi
+information, after that just for power. You should tie a knot into the cable
+on the inside of the base for strain relief as shown in the following photo.
+
+![Knot in USB-C cable for strain relief](docs/readme-resources/IMG_2356.jpg)
+
+3.) Connect the USB-C connector to the plug on the board as shown
+in the following photo.
+
+![USB-C cable plugged in](docs/readme-resources/IMG_3976.jpg)
+
+Put the translucent cover on top and put your object
+to be illuminated on top of the cover.
+
+## WiFi Configuration
 
 Follow these steps to configure the WiFi network information.
 
-1.) Plug in the USB-C cable to your Mac.
+1.) Plug the other end of the USB-C cable into your Mac.
 
 2.) Find out the serial device path with
 
@@ -33,3 +51,20 @@ reboot to ensure the device can connect to WiFi successfully.
 7.) Disconnect the screen session with Ctrl-a followed by Ctrl-\ .
 
 ![This screen video shows an example](docs/readme-resources/esp32-color-lamp-stand-config-menu.gif)
+
+
+# How it's Made
+
+## Enclosure
+
+CAD model: https://a360.co/36blYHf
+
+... more to come
+
+## PCB
+
+... more to come
+
+## Software
+
+... more to come
