@@ -83,7 +83,7 @@ bool run_configuration_menu_state_machine(void) {
 
             configuration_transition_to_state(&state, configuration_state_check_for_nvs_configuration_data);
         } else if (state == configuration_state_check_for_nvs_configuration_data) {
-            nvs_handle my_handle = NULL;
+            nvs_handle_t my_handle = 0;
             if (!open_nvs_handle(&my_handle)) {
                 configuration_transition_to_state(&state, configuration_state_error);
                 continue;
