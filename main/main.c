@@ -315,7 +315,7 @@ void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi) {
 
 void get_stock_data_nasdaq(stock_data_t *stock_data) {
     esp_http_client_config_t config = {
-        .url = "https://api.nasdaq.com/api/quote/AAPL/quote-bar?assetclass=stocks",
+        .url = "https://api.nasdaq.com/api/quote/AAPL/info?assetclass=stocks",
         .event_handler = _http_event_handle_nasdaq,
         .user_data = stock_data,
     };
