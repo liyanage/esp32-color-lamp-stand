@@ -39,9 +39,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.762,
-          "height": 1.524,
-          "width": 1.524
+          "drill": 0.3,
+          "height": 0.6,
+          "width": 0.6
         },
         "silk_line_width": 0.12,
         "silk_text_italic": false,
@@ -69,7 +69,13 @@
           "thermal_relief_spoke_width": 0.5
         }
       },
-      "diff_pair_dimensions": [],
+      "diff_pair_dimensions": [
+        {
+          "gap": 0.0,
+          "via_gap": 0.0,
+          "width": 0.0
+        }
+      ],
       "drc_exclusions": [],
       "meta": {
         "filename": "board_design_settings.json",
@@ -209,7 +215,11 @@
       "track_widths": [
         0.0,
         0.254,
-        0.508
+        0.508,
+        0.6,
+        0.8,
+        1.0,
+        1.5
       ],
       "tuning_pattern_settings": {
         "diff_pair_defaults": {
@@ -237,7 +247,12 @@
           "spacing": 0.6
         }
       },
-      "via_dimensions": [],
+      "via_dimensions": [
+        {
+          "diameter": 0.0,
+          "drill": 0.0
+        }
+      ],
       "zones_allow_external_fillets": false
     },
     "ipc2581": {
