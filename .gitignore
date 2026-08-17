@@ -1,3 +1,4 @@
 main/alphavantage_api_key.h
 .gdbinit.ci
 sdkconfig.old
+**/.history/
