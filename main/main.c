@@ -6,15 +6,17 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_system.h"
-#include "esp_spi_flash.h"
 #include "driver/spi_master.h"
 #include "esp_event.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "pixel.h"
+#include "usb_source.h"
 
 // Serial console boot-time config menu support
 #include "configuration_menu.h"
@@ -26,19 +28,12 @@
 #define PIN_NUM_CLK  14
 
 #define LED_COUNT 32
-#define LED_STRIP_HEADER_SIZE_BYTES 4
-// The data sheet says the end sequence is 4 bytes, but reports say
-// it's depending on the number of chained LEDs so this needs
-// to be adjusted for longer strips. It needs to be at least LED_COUNT / 2 bits.
-#define LED_STRIP_TRAILER_SIZE_BYTES 4
-#define LED_STRIP_BUFFER_SIZE_BYTES (LED_COUNT * 4 + LED_STRIP_HEADER_SIZE_BYTES + LED_STRIP_TRAILER_SIZE_BYTES)
+#define WS2812_RESET_SIZE_BYTES 32
+#define WS2812_ENCODED_PIXEL_SIZE_BYTES 9
+#define LED_STRIP_BUFFER_SIZE_BYTES (2 * WS2812_RESET_SIZE_BYTES + LED_COUNT * WS2812_ENCODED_PIXEL_SIZE_BYTES)
 #define LED_STRIP_BUFFER_SIZE_BITS (LED_STRIP_BUFFER_SIZE_BYTES * 8)
-DRAM_ATTR char led_strip_data[LED_STRIP_BUFFER_SIZE_BYTES];
+DRAM_ATTR uint8_t led_strip_data[LED_STRIP_BUFFER_SIZE_BYTES];
 
-#define LED_PREAMBLE_START 0xe0
-// Range 0 - 31
-#define LED_BRIGHTNESS 10
-#define LED_PREAMBLE (LED_PREAMBLE_START | LED_BRIGHTNESS)
 #define ANIMATION_UPDATE_RATE_HZ 60
 #define ANIMATION_DURATION_SECONDS 3.0
 
@@ -88,6 +83,7 @@ void application_transition_to_state(application_state *current_state, applicati
 void get_stock_data_nasdaq(stock_data_t *stock_data);
 
 static const char *LOG_TAG = "color-lamp-stand-app";
+static uint8_t maximum_led_brightness = 3;
 
 void application_transition_to_state(application_state *current_state, application_state new_state) {
     ESP_LOGI(LOG_TAG, "*** Application state transition from %s to %s\n", application_state_label_for_value(*current_state), application_state_label_for_value(new_state));
@@ -136,17 +132,21 @@ void ip_event_handler(void *event_handler_arg, esp_event_base_t event_base, int3
 
 void app_main(void)
 {
-    ESP_LOGI(LOG_TAG, "Hello world!\n");
+    ESP_LOGI(LOG_TAG, "Starting color lamp stand");
+
+    static application_data_t application_data;
+
+    usb_source_measurement_t usb_source = usb_source_measure();
+    maximum_led_brightness = usb_source.maximum_led_brightness;
+
+    initialize_spi(&application_data);
+    update_led_strip(pixel_color_black, application_data.spi_device_handle);
 
     if (!run_configuration_menu_state_machine()) {
         ESP_LOGE(LOG_TAG, "Unable to get configuration information, will restart in 10 seconds...\n");
         sleep(10);
         esp_restart();
     }
-
-    static application_data_t application_data;
-
-    initialize_spi(&application_data);
 
     ESP_ERROR_CHECK(esp_netif_init());
 
@@ -194,16 +194,16 @@ void initialize_spi(application_data_t *app_data) {
     };
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1*1000*1000,
+        .clock_speed_hz = 2500 * 1000,
         .spics_io_num = -1,
         .queue_size = 1,
         .pre_cb = NULL,
     };
 
-    ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
+    ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
     ESP_ERROR_CHECK(ret);
 
-    ret = spi_bus_add_device(HSPI_HOST, &devcfg, &app_data->spi_device_handle);
+    ret = spi_bus_add_device(SPI2_HOST, &devcfg, &app_data->spi_device_handle);
     ESP_ERROR_CHECK(ret);
 
     ret =  spi_device_acquire_bus(app_data->spi_device_handle, portMAX_DELAY);
@@ -278,39 +278,53 @@ static void query_stock_data_and_update_led_strip(application_data_t *app_data) 
 
 }
 
-void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi) {
-    char *p = led_strip_data;
-
-    memset(p, 0, LED_STRIP_HEADER_SIZE_BYTES);
-    p += LED_STRIP_HEADER_SIZE_BYTES;
-    for (int i = 0; i < LED_COUNT; i++)
-    {
-        *p++ = (LED_PREAMBLE_START | pixel_color.brightness);
-        *p++ = pixel_color.b;
-        *p++ = pixel_color.g;
-        *p++ = pixel_color.r;
+static void write_encoded_bit(size_t *bit_index, bool value)
+{
+    uint8_t symbol = value ? 0b110 : 0b100;
+    for (int symbol_bit = 2; symbol_bit >= 0; --symbol_bit) {
+        if ((symbol & (1U << symbol_bit)) != 0) {
+            led_strip_data[*bit_index / 8] |= 1U << (7 - (*bit_index % 8));
+        }
+        ++(*bit_index);
     }
-    
-    // Set trailing bytes to 0 instead of 1 as the datasheet
-    // specifies because it doesn't seem to matter (it's only needed to
-    // drive extra clock pulses) and setting to 0 will not light up an
-    // extra LED at the end if there is one.
-    memset(p, 0x00, LED_STRIP_TRAILER_SIZE_BYTES);
+}
 
-    // int i = 0;
-    // for (char *q = led_strip_data; q < led_strip_data + LED_STRIP_BUFFER_SIZE_BYTES; q++) {
-    //     ESP_LOGI(LOG_TAG, "LED %02d %p %x", i++, q, *q);
-    // }
-    
-    esp_err_t ret;
-    spi_transaction_t t;
-    memset(&t, 0, sizeof(t));
-    t.length = LED_STRIP_BUFFER_SIZE_BITS;
-    t.user = (void *)0;
-    t.tx_buffer = led_strip_data;
+static void write_encoded_byte(size_t *bit_index, uint8_t value)
+{
+    for (int source_bit = 7; source_bit >= 0; --source_bit) {
+        write_encoded_bit(bit_index, (value & (1U << source_bit)) != 0);
+    }
+}
 
-    ret = spi_device_polling_transmit(spi, &t);
-    assert(ret == ESP_OK);
+static uint8_t apply_brightness(uint8_t channel, uint8_t brightness)
+{
+    return ((uint16_t)channel * brightness + 15) / 31;
+}
+
+void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi)
+{
+    uint8_t brightness = pixel_color.brightness;
+    if (brightness > maximum_led_brightness) {
+        brightness = maximum_led_brightness;
+    }
+
+    uint8_t red = apply_brightness(pixel_color.r, brightness);
+    uint8_t green = apply_brightness(pixel_color.g, brightness);
+    uint8_t blue = apply_brightness(pixel_color.b, brightness);
+
+    memset(led_strip_data, 0, sizeof(led_strip_data));
+    size_t bit_index = WS2812_RESET_SIZE_BYTES * 8;
+    for (int pixel = 0; pixel < LED_COUNT; ++pixel) {
+        write_encoded_byte(&bit_index, green);
+        write_encoded_byte(&bit_index, red);
+        write_encoded_byte(&bit_index, blue);
+    }
+
+    spi_transaction_t transaction = {
+        .length = LED_STRIP_BUFFER_SIZE_BITS,
+        .tx_buffer = led_strip_data,
+    };
+    ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &transaction));
 }
 
 void get_stock_data_nasdaq(stock_data_t *stock_data) {
@@ -318,6 +332,7 @@ void get_stock_data_nasdaq(stock_data_t *stock_data) {
         .url = "https://api.nasdaq.com/api/quote/AAPL/info?assetclass=stocks",
         .event_handler = _http_event_handle_nasdaq,
         .user_data = stock_data,
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -344,9 +359,12 @@ esp_err_t _http_event_handle_nasdaq(esp_http_client_event_t *evt) {
     switch(evt->event_id) {
         case HTTP_EVENT_HEADER_SENT:
         case HTTP_EVENT_ON_HEADER:
+        case HTTP_EVENT_ON_HEADERS_COMPLETE:
+        case HTTP_EVENT_ON_STATUS_CODE:
         case HTTP_EVENT_ON_CONNECTED:
         case HTTP_EVENT_ON_FINISH:
         case HTTP_EVENT_DISCONNECTED:
+        case HTTP_EVENT_REDIRECT:
             break;
 
         case HTTP_EVENT_ERROR:

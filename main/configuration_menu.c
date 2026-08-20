@@ -5,14 +5,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
-#include "esp_spi_flash.h"
 #include "nvs_flash.h"
 #include "esp_wifi.h"
 
 // console support (config menu)
 #include "linenoise/linenoise.h"
-#include "esp_vfs_dev.h"
-#include "driver/uart.h"
 
 #include "configuration_menu.h"
 
@@ -54,9 +51,9 @@ char *configuration_state_label_for_value(configuration_state state) {
 #define NVS_KEY_WIFI_PASSWORD "wifi_password"
 #define CONFIGURATION_MENU_TIMEOUT_SECONDS 2
 
-bool open_nvs_handle(nvs_handle *handle);
+bool open_nvs_handle(nvs_handle_t *handle);
 void configuration_transition_to_state(configuration_state *current_state, configuration_state new_state);
-bool read_nvs_config_wifi_credentials(nvs_handle my_handle);
+bool read_nvs_config_wifi_credentials(nvs_handle_t my_handle);
 
 
 bool run_configuration_menu_state_machine(void) {
@@ -125,26 +122,6 @@ bool run_configuration_menu_state_machine(void) {
             printf("Entering configuration mode\n");
             sleep(1);
 
-            /* Minicom, screen, idf_monitor send CR when ENTER key is pressed */
-            esp_vfs_dev_uart_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
-            /* Move the caret to the beginning of the next line on '\n' */
-            esp_vfs_dev_uart_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
-
-            /* Configure UART. Note that REF_TICK is used so that the baud rate remains
-            * correct while APB frequency is changing in light sleep mode.
-            */
-            const uart_config_t uart_config = {
-                    .baud_rate = 115200,
-                    .data_bits = UART_DATA_8_BITS,
-                    .parity = UART_PARITY_DISABLE,
-                    .stop_bits = UART_STOP_BITS_1,
-                    .use_ref_tick = true
-            };
-            ESP_ERROR_CHECK(uart_param_config(0, &uart_config));
-            /* Install UART driver for interrupt-driven reads and writes */
-            ESP_ERROR_CHECK(uart_driver_install(0, 256, 0, 0, NULL, 0));
-            esp_vfs_dev_uart_use_driver(0);
-
             linenoiseSetDumbMode(1);
             configuration_transition_to_state(&state, configuration_state_running_config_menu);
         } else if (state == configuration_state_running_config_menu) {
@@ -169,7 +146,7 @@ bool run_configuration_menu_state_machine(void) {
                     break;
             }
         } else if (state == configuration_state_querying_for_wifi_credentials) {
-            nvs_handle my_handle = NULL;
+            nvs_handle_t my_handle = 0;
             if (!open_nvs_handle(&my_handle)) {
                 configuration_transition_to_state(&state, configuration_state_error);
                 continue;
@@ -224,7 +201,7 @@ bool run_configuration_menu_state_machine(void) {
     }   
 }
 
-bool read_nvs_config_wifi_credentials(nvs_handle my_handle) {
+bool read_nvs_config_wifi_credentials(nvs_handle_t my_handle) {
     printf("Reading WiFi info from NVS ...\n");
     bool did_find_nvs_wifi_data = false;
     size_t buffer_length = WIFI_CREDENTIAL_BUFFER_SIZE;
@@ -265,7 +242,7 @@ bool query_float_value(char *prompt, float *out_value) {
     return did_get_value;
 }
 
-bool open_nvs_handle(nvs_handle *handle) {
+bool open_nvs_handle(nvs_handle_t *handle) {
     printf("Opening Non-Volatile Storage (NVS) handle...\n");
     esp_err_t err = nvs_open("storage", NVS_READWRITE, handle);
     if (err != ESP_OK) {

@@ -27,15 +27,15 @@ Follow these steps to configure the WiFi network information.
 
 1.) Plug the other end of the USB-C cable into your Mac.
 
-2.) Find out the serial device path with
+2.) Find the native USB serial device with
 
-    ls -l /dev/cu.usbserial*
+    ls -l /dev/cu.usbmodem*
     
-That gives you something like "/dev/cu.usbserial-1410"
+That gives you a path such as `/dev/cu.usbmodem1101`.
 
 3.) Run the following "screen" command to connect to the lamp's serial console:
 
-    screen /dev/cu.usbserial-1410 115200
+    screen /dev/cu.usbmodem1101 115200
 
 4.) Immediately after typing that command the microcontroller will reboot when the
 serial connection opens. Immediately press any key a few times to enter the
@@ -67,4 +67,15 @@ CAD model: https://a360.co/36blYHf
 
 ## Software
 
-... more to come
+The firmware targets the ESP32-S3-WROOM-1-N8R8 and ESP-IDF 6.0.2. Activate
+that ESP-IDF installation, then build and flash over the board's native USB
+connection:
+
+    . "$HOME/esp/esp-idf-v6.0.2/export.sh"
+    idf.py build
+    idf.py flash monitor
+
+At startup the firmware measures the USB-C CC1 and CC2 voltages using GPIO4
+and GPIO5. It classifies the source's advertised current as USB default,
+1.5 A, or 3 A and limits the 32 LEDs accordingly. If ADC calibration is not
+available, it uses the conservative USB-default limit.
