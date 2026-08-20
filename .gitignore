@@ -2,3 +2,11 @@ main/alphavantage_api_key.h
 .gdbinit.ci
 sdkconfig.old
 **/.history/
+.DS_Store
+.venv/
+**/__pycache__/
+*.bak
+*.kicad_prl
+*.kicad_*.lck
+pcb/manufacturing/gerbers/
+pcb/manufacturing/jlcpcb/gerbers/

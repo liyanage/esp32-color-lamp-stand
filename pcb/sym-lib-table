@@ -1,0 +1,4 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "esp32-color-lamp-stand-symbols") (type "KiCad") (uri "${KIPRJMOD}/esp32-color-lamp-stand-symbols.kicad_sym") (options "") (descr ""))
+)
