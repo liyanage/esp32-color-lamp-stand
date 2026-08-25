@@ -4,6 +4,7 @@ sdkconfig.old
 **/.history/
 .DS_Store
 .venv/
+managed_components/
 **/__pycache__/
 *.bak
 *.kicad_prl
