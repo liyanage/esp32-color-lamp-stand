@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="750" viewBox="0 0 1200 750" role="img" aria-labelledby="title desc">
+  <title id="title">USB-C power capability light patterns</title>
+  <desc id="desc">Four stylized circuit boards showing eight amber LEDs for USB default current, sixteen cyan LEDs for 1.5 amps, all thirty-two LEDs green for 3 amps, and red flashes followed by amber when sensing fails.</desc>
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <g id="pcb-leds" fill="currentColor">
+      <circle cx="116.5" cy="83" r="2.5"/><circle cx="133.5" cy="83" r="2.5"/><circle cx="150.5" cy="83" r="2.5"/><circle cx="167.5" cy="83" r="2.5"/><circle cx="184.5" cy="83" r="2.5"/><circle cx="201.5" cy="83" r="2.5"/>
+      <circle cx="211" cy="69.5" r="2.5"/><circle cx="211" cy="52.5" r="2.5"/><circle cx="211" cy="35.5" r="2.5"/><circle cx="211" cy="18.5" r="2.5"/>
+      <circle cx="201.5" cy="5" r="2.5"/><circle cx="184.5" cy="5" r="2.5"/><circle cx="167.5" cy="5" r="2.5"/><circle cx="150.5" cy="5" r="2.5"/><circle cx="133.5" cy="5" r="2.5"/><circle cx="116.5" cy="5" r="2.5"/><circle cx="99.5" cy="5" r="2.5"/><circle cx="82.5" cy="5" r="2.5"/><circle cx="65.5" cy="5" r="2.5"/><circle cx="48.5" cy="5" r="2.5"/><circle cx="31.5" cy="5" r="2.5"/><circle cx="14.5" cy="5" r="2.5"/>
+      <circle cx="5" cy="18.5" r="2.5"/><circle cx="5" cy="35.5" r="2.5"/><circle cx="5" cy="52.5" r="2.5"/><circle cx="5" cy="69.5" r="2.5"/>
+      <circle cx="14.5" cy="83" r="2.5"/><circle cx="31.5" cy="83" r="2.5"/><circle cx="48.5" cy="83" r="2.5"/><circle cx="65.5" cy="83" r="2.5"/><circle cx="82.5" cy="83" r="2.5"/><circle cx="99.5" cy="83" r="2.5"/>
+    </g>
+    <g id="pcb-first-8" fill="currentColor">
+      <circle cx="116.5" cy="83" r="2.8"/><circle cx="133.5" cy="83" r="2.8"/><circle cx="150.5" cy="83" r="2.8"/><circle cx="167.5" cy="83" r="2.8"/><circle cx="184.5" cy="83" r="2.8"/><circle cx="201.5" cy="83" r="2.8"/><circle cx="211" cy="69.5" r="2.8"/><circle cx="211" cy="52.5" r="2.8"/>
+    </g>
+    <g id="pcb-first-16" fill="currentColor">
+      <use href="#pcb-first-8"/>
+      <circle cx="211" cy="35.5" r="2.8"/><circle cx="211" cy="18.5" r="2.8"/><circle cx="201.5" cy="5" r="2.8"/><circle cx="184.5" cy="5" r="2.8"/><circle cx="167.5" cy="5" r="2.8"/><circle cx="150.5" cy="5" r="2.8"/><circle cx="133.5" cy="5" r="2.8"/><circle cx="116.5" cy="5" r="2.8"/>
+    </g>
+    <g id="board">
+      <g transform="translate(20 38) scale(2.21709)">
+        <rect width="216.5" height="88.5" rx="6.5" fill="#173b31" stroke="#285346" stroke-width="1.35"/>
+        <rect x="15" y="15" width="62" height="58.5" rx="3" fill="#0d171f" stroke="#285346" stroke-width="1.35"/>
+        <rect x="139" y="15" width="62" height="58.5" rx="3" fill="#0d171f" stroke="#285346" stroke-width="1.35"/>
+        <use href="#pcb-leds" color="#697c76" opacity=".42"/>
+      </g>
+    </g>
+    <g id="all-leds" transform="translate(20 38) scale(2.21709)"><use href="#pcb-leds"/></g>
+    <g id="eight-leds" transform="translate(20 38) scale(2.21709)"><use href="#pcb-first-8"/></g>
+    <g id="sixteen-leds" transform="translate(20 38) scale(2.21709)"><use href="#pcb-first-16"/></g>
+  </defs>
+  <rect width="1200" height="750" rx="28" fill="#0d171f"/>
+  <text x="55" y="58" fill="#f5f7fa" font-family="system-ui, sans-serif" font-size="30" font-weight="700">USB-C power check</text>
+  <text x="55" y="88" fill="#9dafbd" font-family="system-ui, sans-serif" font-size="17">A brief sweep shows the current advertised by the connected power source.</text>
+
+  <g transform="translate(55 115) scale(.98)">
+    <use href="#board"/>
+    <use href="#eight-leds" color="#ffad32" filter="url(#glow)"/>
+    <text x="20" y="268" fill="#ffbd57" font-family="system-ui, sans-serif" font-size="23" font-weight="700">USB default</text>
+    <text x="20" y="295" fill="#b9c6cf" font-family="system-ui, sans-serif" font-size="17">8 amber LEDs · conservative brightness</text>
+  </g>
+
+  <g transform="translate(625 115) scale(.98)">
+    <use href="#board"/>
+    <use href="#sixteen-leds" color="#33d8f0" filter="url(#glow)"/>
+    <text x="20" y="268" fill="#65e7f8" font-family="system-ui, sans-serif" font-size="23" font-weight="700">1.5 A</text>
+    <text x="20" y="295" fill="#b9c6cf" font-family="system-ui, sans-serif" font-size="17">16 cyan LEDs · normal brightness</text>
+  </g>
+
+  <g transform="translate(55 420) scale(.98)">
+    <use href="#board"/>
+    <use href="#all-leds" color="#48df82" filter="url(#glow)"/>
+    <text x="20" y="268" fill="#75eb9f" font-family="system-ui, sans-serif" font-size="23" font-weight="700">3 A</text>
+    <text x="20" y="295" fill="#b9c6cf" font-family="system-ui, sans-serif" font-size="17">32 green LEDs · highest supported capability</text>
+  </g>
+
+  <g transform="translate(625 420) scale(.98)">
+    <use href="#board"/>
+    <use href="#all-leds" color="#ff4d5e" filter="url(#glow)" opacity=".92"/>
+    <path d="M458 72l28-34m-12 34l28-34" stroke="#ffced3" stroke-width="5" stroke-linecap="round"/>
+    <text x="20" y="268" fill="#ff7582" font-family="system-ui, sans-serif" font-size="23" font-weight="700">Sensing unavailable</text>
+    <text x="20" y="295" fill="#b9c6cf" font-family="system-ui, sans-serif" font-size="17">2 red flashes · then the 8-LED amber pattern</text>
+  </g>
+</svg>
