@@ -87,6 +87,7 @@ usb_source_measurement_t usb_source_measure(void)
     bool cc2_calibrated = create_calibration(CC2_ADC_CHANNEL, &cc2_calibration);
 
     if (cc1_calibrated && cc2_calibrated) {
+        result.measurement_valid = true;
         result.cc1_mv = read_average_mv(adc, CC1_ADC_CHANNEL, cc1_calibration);
         result.cc2_mv = read_average_mv(adc, CC2_ADC_CHANNEL, cc2_calibration);
         int active_cc_mv = result.cc1_mv > result.cc2_mv ? result.cc1_mv : result.cc2_mv;

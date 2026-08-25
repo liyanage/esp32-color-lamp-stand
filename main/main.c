@@ -81,6 +81,8 @@ esp_err_t _http_event_handle_nasdaq(esp_http_client_event_t *evt);
 void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi);
 static void query_stock_data_and_update_led_strip(application_data_t *app_data);
 static void wifi_status_changed(wifi_setup_status_t status);
+static void show_usb_power_capability(usb_source_measurement_t measurement,
+                                      spi_device_handle_t spi);
 void application_transition_to_state(application_state *current_state, application_state new_state);
 void get_stock_data_nasdaq(stock_data_t *stock_data);
 
@@ -136,6 +138,7 @@ void app_main(void)
 
     initialize_spi(&application_data);
     update_led_strip(pixel_color_black, application_data.spi_device_handle);
+    show_usb_power_capability(usb_source, application_data.spi_device_handle);
 
     const esp_timer_create_args_t periodic_timer_args = {
             .callback = &periodic_timer_callback,
@@ -311,22 +314,21 @@ static uint8_t apply_brightness(uint8_t channel, uint8_t brightness)
     return ((uint16_t)channel * brightness + 15) / 31;
 }
 
-void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi)
+static void update_led_strip_pixels(const pixel_color_t pixels[LED_COUNT],
+                                    spi_device_handle_t spi)
 {
     xSemaphoreTake(led_mutex, portMAX_DELAY);
-
-    uint8_t brightness = pixel_color.brightness;
-    if (brightness > maximum_led_brightness) {
-        brightness = maximum_led_brightness;
-    }
-
-    uint8_t red = apply_brightness(pixel_color.r, brightness);
-    uint8_t green = apply_brightness(pixel_color.g, brightness);
-    uint8_t blue = apply_brightness(pixel_color.b, brightness);
 
     memset(led_strip_data, 0, sizeof(led_strip_data));
     size_t bit_index = WS2812_RESET_SIZE_BYTES * 8;
     for (int pixel = 0; pixel < LED_COUNT; ++pixel) {
+        uint8_t brightness = pixels[pixel].brightness;
+        if (brightness > maximum_led_brightness) {
+            brightness = maximum_led_brightness;
+        }
+        uint8_t red = apply_brightness(pixels[pixel].r, brightness);
+        uint8_t green = apply_brightness(pixels[pixel].g, brightness);
+        uint8_t blue = apply_brightness(pixels[pixel].b, brightness);
         write_encoded_byte(&bit_index, green);
         write_encoded_byte(&bit_index, red);
         write_encoded_byte(&bit_index, blue);
@@ -338,6 +340,68 @@ void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi)
     };
     ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &transaction));
     xSemaphoreGive(led_mutex);
+}
+
+void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi)
+{
+    pixel_color_t pixels[LED_COUNT];
+    for (int pixel = 0; pixel < LED_COUNT; ++pixel) {
+        pixels[pixel] = pixel_color;
+    }
+    update_led_strip_pixels(pixels, spi);
+}
+
+static void show_usb_power_capability(usb_source_measurement_t measurement,
+                                      spi_device_handle_t spi)
+{
+    if (!measurement.measurement_valid) {
+        pixel_color_t error = {.brightness = 10, .r = 0xff};
+        for (int flash = 0; flash < 2; ++flash) {
+            update_led_strip(error, spi);
+            vTaskDelay(pdMS_TO_TICKS(180));
+            update_led_strip(pixel_color_black, spi);
+            vTaskDelay(pdMS_TO_TICKS(180));
+        }
+    }
+
+    int illuminated_pixels;
+    pixel_color_t gauge_color;
+    switch (measurement.current) {
+        case USB_SOURCE_CURRENT_3_A:
+            illuminated_pixels = LED_COUNT;
+            gauge_color = (pixel_color_t){.brightness = 10, .g = 0xff};
+            break;
+        case USB_SOURCE_CURRENT_1_5_A:
+            illuminated_pixels = LED_COUNT / 2;
+            gauge_color = (pixel_color_t){.brightness = 10, .g = 0x80, .b = 0xff};
+            break;
+        case USB_SOURCE_CURRENT_DEFAULT:
+        default:
+            illuminated_pixels = LED_COUNT / 4;
+            gauge_color = (pixel_color_t){.brightness = 10, .r = 0xff, .g = 0x60};
+            break;
+    }
+
+    pixel_color_t pixels[LED_COUNT] = {0};
+    TickType_t sweep_delay = pdMS_TO_TICKS(500 / illuminated_pixels);
+    for (int pixel = 0; pixel < illuminated_pixels; ++pixel) {
+        pixels[pixel] = gauge_color;
+        update_led_strip_pixels(pixels, spi);
+        vTaskDelay(sweep_delay);
+    }
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    uint8_t starting_brightness = gauge_color.brightness;
+    if (starting_brightness > maximum_led_brightness) {
+        starting_brightness = maximum_led_brightness;
+    }
+    for (int brightness = starting_brightness; brightness >= 0; --brightness) {
+        for (int pixel = 0; pixel < illuminated_pixels; ++pixel) {
+            pixels[pixel].brightness = brightness;
+        }
+        update_led_strip_pixels(pixels, spi);
+        vTaskDelay(pdMS_TO_TICKS(70));
+    }
 }
 
 void get_stock_data_nasdaq(stock_data_t *stock_data) {

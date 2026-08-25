@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef enum {
@@ -13,6 +14,7 @@ typedef struct {
     int cc1_mv;
     int cc2_mv;
     uint8_t maximum_led_brightness;
+    bool measurement_valid;
 } usb_source_measurement_t;
 
 usb_source_measurement_t usb_source_measure(void);
