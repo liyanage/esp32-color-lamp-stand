@@ -4,6 +4,7 @@
 
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -17,9 +18,7 @@
 #include "esp_crt_bundle.h"
 #include "pixel.h"
 #include "usb_source.h"
-
-// Serial console boot-time config menu support
-#include "configuration_menu.h"
+#include "wifi_manager.h"
 
 // Test mode uses a random number instead of performing an HTTP request
 #define LED_TEST_MODE 0
@@ -66,6 +65,8 @@ typedef struct application_data {
     pixel_color_t current_pixel_color;
 } application_data_t;
 
+static application_data_t application_data;
+
 typedef struct stock_data {
     bool have_valid_value;
     double value;
@@ -79,11 +80,13 @@ static void stop_timer(application_data_t *app_data);
 esp_err_t _http_event_handle_nasdaq(esp_http_client_event_t *evt);
 void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi);
 static void query_stock_data_and_update_led_strip(application_data_t *app_data);
+static void wifi_status_changed(wifi_setup_status_t status);
 void application_transition_to_state(application_state *current_state, application_state new_state);
 void get_stock_data_nasdaq(stock_data_t *stock_data);
 
 static const char *LOG_TAG = "color-lamp-stand-app";
 static uint8_t maximum_led_brightness = 3;
+static SemaphoreHandle_t led_mutex;
 
 void application_transition_to_state(application_state *current_state, application_state new_state) {
     ESP_LOGI(LOG_TAG, "*** Application state transition from %s to %s\n", application_state_label_for_value(*current_state), application_state_label_for_value(new_state));
@@ -97,16 +100,10 @@ void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, in
 
     if (event_id == WIFI_EVENT_STA_START) {
         ESP_LOGI(LOG_TAG, "WIFI_EVENT_STA_START");
-        ESP_ERROR_CHECK(esp_wifi_connect());        
     } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
         ESP_LOGI(LOG_TAG, "WIFI_EVENT_STA_CONNECTED");
-        wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *)event_data;
-        ESP_LOGI(LOG_TAG, "station "MACSTR" join, AID=%d", MAC2STR(event->mac), event->aid);
     } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGI(LOG_TAG, "WIFI_EVENT_STA_DISCONNECTED");
-        wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
-        ESP_LOGI(LOG_TAG, "station "MACSTR" disconnect, AID=%d", MAC2STR(event->mac), event->aid);
-        ESP_ERROR_CHECK(esp_wifi_connect());
         application_transition_to_state(&app_data->state, application_state_offline);
         stop_timer(app_data);
     }    
@@ -134,44 +131,11 @@ void app_main(void)
 {
     ESP_LOGI(LOG_TAG, "Starting color lamp stand");
 
-    static application_data_t application_data;
-
     usb_source_measurement_t usb_source = usb_source_measure();
     maximum_led_brightness = usb_source.maximum_led_brightness;
 
     initialize_spi(&application_data);
     update_led_strip(pixel_color_black, application_data.spi_device_handle);
-
-    if (!run_configuration_menu_state_machine()) {
-        ESP_LOGE(LOG_TAG, "Unable to get configuration information, will restart in 10 seconds...\n");
-        sleep(10);
-        esp_restart();
-    }
-
-    ESP_ERROR_CHECK(esp_netif_init());
-
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    // ESP_ERROR_CHECK(esp_event_loop_init(event_handler, &application_data));
-
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, &application_data));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, &ip_event_handler, &application_data));
-
-    esp_netif_create_default_wifi_sta();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    wifi_config_t sta_config = {
-        .sta = {
-            .bssid_set = false
-        }
-    };
-    strlcpy((char *)sta_config.sta.ssid, s_wifi_ssid, sizeof(sta_config.sta.ssid));
-    strlcpy((char *)sta_config.sta.password, s_wifi_password, sizeof(sta_config.sta.password));
-    // ESP_LOGD(LOG_TAG, "debug: WiFi credentials: %s %s\n", sta_config.sta.ssid, sta_config.sta.password);
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
 
     const esp_timer_create_args_t periodic_timer_args = {
             .callback = &periodic_timer_callback,
@@ -181,6 +145,49 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &application_data.periodic_timer));
 
+    ESP_ERROR_CHECK(wifi_manager_initialize_and_connect(wifi_status_changed));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                               wifi_event_handler, &application_data));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                               ip_event_handler, &application_data));
+    wifi_manager_start_reset_button_monitor(wifi_status_changed);
+
+    application_transition_to_state(&application_data.state, application_state_online);
+    query_stock_data_and_update_led_strip(&application_data);
+    start_timer(&application_data);
+
+}
+
+static void wifi_status_changed(wifi_setup_status_t status)
+{
+    pixel_color_t color = pixel_color_black;
+    switch (status) {
+        case WIFI_SETUP_STATUS_CONNECTING:
+            color = (pixel_color_t){.brightness = 6, .b = 0xff};
+            break;
+        case WIFI_SETUP_STATUS_PORTAL:
+            color = (pixel_color_t){.brightness = 12, .r = 0xff, .g = 0x60};
+            break;
+        case WIFI_SETUP_STATUS_PORTAL_DIM:
+            color = (pixel_color_t){.brightness = 3, .r = 0xff, .g = 0x60};
+            break;
+        case WIFI_SETUP_STATUS_TESTING:
+            color = (pixel_color_t){.brightness = 12, .b = 0xff};
+            break;
+        case WIFI_SETUP_STATUS_TESTING_DIM:
+            color = (pixel_color_t){.brightness = 3, .b = 0xff};
+            break;
+        case WIFI_SETUP_STATUS_FAILED:
+            color = (pixel_color_t){.brightness = 8, .r = 0xff};
+            break;
+        case WIFI_SETUP_STATUS_CONNECTED:
+            color = (pixel_color_t){.brightness = 8, .g = 0xff};
+            break;
+        case WIFI_SETUP_STATUS_RESETTING:
+            color = (pixel_color_t){.brightness = 15, .r = 0xff};
+            break;
+    }
+    update_led_strip(color, application_data.spi_device_handle);
 }
 
 void initialize_spi(application_data_t *app_data) {
@@ -207,7 +214,10 @@ void initialize_spi(application_data_t *app_data) {
     ESP_ERROR_CHECK(ret);
 
     ret =  spi_device_acquire_bus(app_data->spi_device_handle, portMAX_DELAY);
-    ESP_ERROR_CHECK(ret);    
+    ESP_ERROR_CHECK(ret);
+
+    led_mutex = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(led_mutex == NULL ? ESP_ERR_NO_MEM : ESP_OK);
 }
 
 static void start_timer(application_data_t *app_data) {
@@ -303,6 +313,8 @@ static uint8_t apply_brightness(uint8_t channel, uint8_t brightness)
 
 void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi)
 {
+    xSemaphoreTake(led_mutex, portMAX_DELAY);
+
     uint8_t brightness = pixel_color.brightness;
     if (brightness > maximum_led_brightness) {
         brightness = maximum_led_brightness;
@@ -325,6 +337,7 @@ void update_led_strip(pixel_color_t pixel_color, spi_device_handle_t spi)
         .tx_buffer = led_strip_data,
     };
     ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &transaction));
+    xSemaphoreGive(led_mutex);
 }
 
 void get_stock_data_nasdaq(stock_data_t *stock_data) {

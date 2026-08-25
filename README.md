@@ -21,36 +21,23 @@ in the following photo.
 Put the translucent cover on top and put your object
 to be illuminated on top of the cover.
 
-## WiFi Configuration
+## Wi-Fi Configuration
 
-Follow these steps to configure the WiFi network information.
+On first use, the lamp pulses amber and creates a temporary Wi-Fi network named
+`ColorLamp-Setup-XXXX`.
 
-1.) Plug the other end of the USB-C cable into your Mac.
+1. Connect a phone or computer to that network.
+2. The setup page should open automatically. If it does not, open
+   `http://192.168.4.1` in a browser.
+3. Select the home Wi-Fi network, enter its password, and choose **Connect**.
+4. The lamp pulses blue while testing the connection. A green confirmation means
+   the credentials were saved and the lamp will restart. Red means the connection
+   failed; correct the password and try again.
 
-2.) Find the native USB serial device with
-
-    ls -l /dev/cu.usbmodem*
-    
-That gives you a path such as `/dev/cu.usbmodem1101`.
-
-3.) Run the following "screen" command to connect to the lamp's serial console:
-
-    screen /dev/cu.usbmodem1101 115200
-
-4.) Immediately after typing that command the microcontroller will reboot when the
-serial connection opens. Immediately press any key a few times to enter the
-configuration menu. If you missed it, disconnect the screen session as shown in
-step 7 and try again.
-
-5.) Once you're in the configuration menu, choose "w" to set the Wifi settings.
-Enter your WiFi name and password when prompted.
-
-6.) Choose "r" from the main menu to reboot. Check the log messages after the
-reboot to ensure the device can connect to WiFi successfully.
-
-7.) Disconnect the screen session with Ctrl-a followed by Ctrl-\ .
-
-![This screen video shows an example](docs/readme-resources/esp32-color-lamp-stand-config-menu.gif)
+To move the lamp to another network, let it finish starting and then hold the
+**BOOT** button for five seconds. The lamp turns red, erases only its Wi-Fi
+credentials, and restarts in setup mode. Do not hold BOOT while applying power or
+pressing RESET, because BOOT also selects the ESP32 download mode during reset.
 
 
 # How it's Made

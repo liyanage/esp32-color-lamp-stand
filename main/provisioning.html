@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Color Lamp Setup</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 32rem; margin: 0 auto; padding: 2rem 1.25rem; }
+    h1 { margin-bottom: .35rem; }
+    p { line-height: 1.45; }
+    label { display: block; margin-top: 1.1rem; font-weight: 600; }
+    select, input, button { box-sizing: border-box; width: 100%; padding: .8rem; margin-top: .4rem; font: inherit; }
+    button { margin-top: 1.4rem; font-weight: 700; cursor: pointer; }
+    #status { min-height: 1.5rem; margin-top: 1rem; }
+    .error { color: #c62828; }
+    .success { color: #2e7d32; }
+    .muted { opacity: .7; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Color Lamp Setup</h1>
+  <p>Choose the Wi-Fi network this lamp should use.</p>
+  <form id="setup">
+    <label for="ssid">Wi-Fi network</label>
+    <select id="ssid" name="ssid" required><option>Scanning…</option></select>
+    <label for="password">Wi-Fi password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password">
+    <button type="submit">Connect</button>
+  </form>
+  <div id="status"></div>
+  <p class="muted">The lamp will restart after a successful connection.</p>
+  <script>
+    const form = document.querySelector('#setup');
+    const ssid = document.querySelector('#ssid');
+    const statusBox = document.querySelector('#status');
+    let polling = false;
+
+    function show(message, className = '') {
+      statusBox.textContent = message;
+      statusBox.className = className;
+    }
+
+    async function scan() {
+      try {
+        const response = await fetch('/api/networks');
+        const networks = await response.json();
+        ssid.replaceChildren();
+        for (const network of networks) {
+          const option = document.createElement('option');
+          option.value = network.ssid;
+          option.textContent = `${network.ssid} (${network.rssi} dBm)${network.open ? ' — open' : ''}`;
+          ssid.append(option);
+        }
+        if (!networks.length) show('No networks found. Reload to scan again.', 'error');
+      } catch (_) {
+        show('Unable to scan. Reload this page to try again.', 'error');
+      }
+    }
+
+    async function pollStatus() {
+      if (!polling) return;
+      try {
+        const response = await fetch('/api/status');
+        const result = await response.json();
+        show(result.message, result.state === 'failed' ? 'error' : result.state === 'connected' ? 'success' : '');
+        if (result.state === 'connected') return;
+        if (result.state === 'failed') {
+          polling = false;
+          form.querySelector('button').disabled = false;
+          return;
+        }
+      } catch (_) {}
+      setTimeout(pollStatus, 750);
+    }
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      form.querySelector('button').disabled = true;
+      show('Testing the connection…');
+      const body = new URLSearchParams(new FormData(form));
+      const response = await fetch('/connect', { method: 'POST', body });
+      if (!response.ok) {
+        show(await response.text(), 'error');
+        form.querySelector('button').disabled = false;
+        return;
+      }
+      polling = true;
+      pollStatus();
+    });
+
+    scan();
+  </script>
+</body>
+</html>
